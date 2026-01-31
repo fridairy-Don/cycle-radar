@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// === 核动力数据引擎 V3 (最终适配版) ===
+// === 数据引擎 V4 (完全修复版) ===
 export function useStockData(symbols) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -8,12 +8,11 @@ export function useStockData(symbols) {
   const fetchData = useCallback(async () => {
     if (!symbols || symbols.length === 0) return;
     
-    // 首次加载显示loading
     if (Object.keys(data).length === 0) setLoading(true);
     
     const newData = {};
     
-    // 并行请求，速度最快
+    // 并行请求
     const promises = symbols.map(async (symbol) => {
       try {
         const res = await fetch(`/api/stock?symbol=${symbol}`);
@@ -21,18 +20,23 @@ export function useStockData(symbols) {
         
         if (json.error) return; 
         
-        // 关键：这里直接把后端算好的标准字段给前端
+        // 【关键】映射所有字段，确保 UI 组件能读到
         newData[symbol] = {
           price: json.price,
-          // Claude 的 UI 组件通常检测这些字段：
-          dayChange: json.dayChange,      // 日
-          weekChange: json.weekChange,    // 周
-          monthChange: json.monthChange,  // 月
-          drawdown: json.drawdown,        // 回撤
           
-          // 兼容性字段 (有些组件可能读这个旧名字)
-          changePercent: json.dayChange, 
+          // 涨跌幅 (后端给的是小数，如 0.05，UI组件会自动处理成 5%)
+          dayChange: json.dayChange,
+          weekChange: json.weekChange,
+          monthChange: json.monthChange,
           
+          // 回撤与极值
+          drawdown: json.drawdown,
+          high52: json.high52,
+          low52: json.low52,
+          
+          currency: json.currency,
+          
+          // 有效性标记
           valid: true 
         };
       } catch (e) {
@@ -42,23 +46,18 @@ export function useStockData(symbols) {
 
     await Promise.all(promises);
     
-    // 更新数据 (保留旧数据，只更新变动的)
     setData(prev => ({ ...prev, ...newData }));
     setLoading(false);
   }, [JSON.stringify(symbols)]);
 
   useEffect(() => {
     fetchData();
-    // 30秒刷新一次
+    // 30秒自动刷新
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { data, loading, refresh: fetchData };
-}
-
-// Watchlist 部分保持不变，为了方便你复制，我这里也贴上
-export function useWatchlist() {
+  // Watchlist 逻辑 (保持 Claude 原版)
   const [watchlist, setWatchlist] = useState(() => {
     try {
       const saved = localStorage.getItem('cycle-radar-watchlist');
@@ -90,5 +89,15 @@ export function useWatchlist() {
     return Object.values(watchlist).flat();
   };
 
-  return { watchlist, addStock, removeStock, getAllStocks };
+  return { 
+    data, 
+    loading, 
+    refresh: fetchData,
+    watchlist, 
+    addStock, 
+    removeStock, 
+    getAllStocks 
+  };
 }
+
+export { useWatchlist }; // 兼容导出
