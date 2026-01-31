@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// === 核动力数据引擎 V2 (修复版) ===
+// === 核动力数据引擎 V3 (最终适配版) ===
 export function useStockData(symbols) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -8,50 +8,56 @@ export function useStockData(symbols) {
   const fetchData = useCallback(async () => {
     if (!symbols || symbols.length === 0) return;
     
-    // 首次加载显示 loading，后续静默刷新
+    // 首次加载显示loading
     if (Object.keys(data).length === 0) setLoading(true);
     
     const newData = {};
     
+    // 并行请求，速度最快
     const promises = symbols.map(async (symbol) => {
       try {
-        // 请求升级后的后端接口
         const res = await fetch(`/api/stock?symbol=${symbol}`);
         const json = await res.json();
         
         if (json.error) return; 
         
-        // 【关键修复】这里把所有字段都传给 UI
+        // 关键：这里直接把后端算好的标准字段给前端
         newData[symbol] = {
           price: json.price,
-          changePercent: json.changePercent,   // 日涨跌
-          weekChangePercent: json.weekChangePercent, // 周涨跌
-          drawdown: json.drawdown,             // 回撤 (用于显示冷热标签)
-          high52: json.high52,                 // 52周最高
-          currency: json.currency,
+          // Claude 的 UI 组件通常检测这些字段：
+          dayChange: json.dayChange,      // 日
+          weekChange: json.weekChange,    // 周
+          monthChange: json.monthChange,  // 月
+          drawdown: json.drawdown,        // 回撤
+          
+          // 兼容性字段 (有些组件可能读这个旧名字)
+          changePercent: json.dayChange, 
+          
           valid: true 
         };
       } catch (e) {
-        console.error(`Fetch failed for ${symbol}`, e);
+        console.error(`Fetch error ${symbol}`, e);
       }
     });
 
     await Promise.all(promises);
     
+    // 更新数据 (保留旧数据，只更新变动的)
     setData(prev => ({ ...prev, ...newData }));
     setLoading(false);
   }, [JSON.stringify(symbols)]);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // 30秒刷新
+    // 30秒刷新一次
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
   return { data, loading, refresh: fetchData };
 }
 
-// Watchlist 逻辑保持不变
+// Watchlist 部分保持不变，为了方便你复制，我这里也贴上
 export function useWatchlist() {
   const [watchlist, setWatchlist] = useState(() => {
     try {
