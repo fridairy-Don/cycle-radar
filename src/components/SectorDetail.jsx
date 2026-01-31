@@ -14,25 +14,22 @@ const formatPrice = (value) => {
 };
 
 const SectorDetail = ({ 
-  sectorId, 
-  etfData, 
-  stockData, 
-  watchlist, 
-  onBack, 
-  onAddStock, 
-  onRemoveStock 
+  sectorId, etfData, stockData, watchlist, 
+  onBack, onAddStock, onRemoveStock 
 }) => {
   const sector = getSectorById(sectorId);
   const stocks = watchlist[sectorId] || [];
   
   const [newSymbol, setNewSymbol] = useState('');
-  const [sortBy, setSortBy] = useState('symbol'); 
-  const [sortOrder, setSortOrder] = useState('asc');
+  // 默认按日涨跌降序排列（看谁涨得最好）
+  const [sortBy, setSortBy] = useState('dayChange'); 
+  const [sortOrder, setSortOrder] = useState('desc');
   const [filterDrawdown, setFilterDrawdown] = useState(0); 
   
   const sortedStocks = useMemo(() => {
     let filtered = [...stocks];
     
+    // 1. 筛选
     if (filterDrawdown > 0) {
       filtered = filtered.filter(symbol => {
         const data = stockData[symbol];
@@ -40,6 +37,7 @@ const SectorDetail = ({
       });
     }
     
+    // 2. 排序
     filtered.sort((a, b) => {
       const dataA = stockData[a];
       const dataB = stockData[b];
@@ -47,21 +45,16 @@ const SectorDetail = ({
       let valueA, valueB;
       
       switch (sortBy) {
+        case 'symbol':
+          valueA = a; valueB = b; break;
+        case 'price':
+          valueA = dataA?.price ?? 0; valueB = dataB?.price ?? 0; break;
         case 'dayChange':
-          valueA = dataA?.dayChangePercent ?? -999;
-          valueB = dataB?.dayChangePercent ?? -999;
-          break;
-        case 'monthChange':
-          valueA = dataA?.monthChangePercent ?? -999;
-          valueB = dataB?.monthChangePercent ?? -999;
-          break;
-        case 'drawdown':
-          valueA = Math.abs(dataA?.drawdown ?? 0);
-          valueB = Math.abs(dataB?.drawdown ?? 0);
-          break;
+          valueA = dataA?.dayChangePercent ?? -999; valueB = dataB?.dayChangePercent ?? -999; break;
+        case 'drawdown': // 排序回撤幅度
+          valueA = Math.abs(dataA?.drawdown ?? 0); valueB = Math.abs(dataB?.drawdown ?? 0); break;
         default:
-          valueA = a;
-          valueB = b;
+          valueA = 0; valueB = 0;
       }
       
       if (sortOrder === 'asc') return valueA > valueB ? 1 : -1;
@@ -76,9 +69,25 @@ const SectorDetail = ({
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortBy(field);
-      setSortOrder('desc');
+      setSortOrder('desc'); // 默认切换新列时用降序（大的在前）
     }
   };
+
+  // 排序按钮组件 (为了代码整洁)
+  const SortHeader = ({ field, label, align = 'right' }) => (
+    <div 
+      onClick={() => handleSort(field)} 
+      className={`cursor-pointer flex items-center gap-1 hover:text-white transition-colors py-2
+        ${sortBy === field ? 'text-radar-accent font-bold' : ''}
+        ${align === 'right' ? 'justify-end' : 'justify-start'}
+      `}
+    >
+      {label}
+      <span className="text-[10px] w-3">
+        {sortBy === field && (sortOrder === 'asc' ? '▲' : '▼')}
+      </span>
+    </div>
+  );
   
   const handleAddStock = (e) => {
     e.preventDefault();
@@ -95,89 +104,49 @@ const SectorDetail = ({
   if (!sector) return null;
   
   return (
-    <section className="py-8 animate-fade-in">
+    <section className="py-4 md:py-8 animate-fade-in pb-20"> {/* 底部留白防止遮挡 */}
       <div className="max-w-7xl mx-auto px-4">
-        {/* 返回按钮 */}
-        <div className="flex items-center gap-4 mb-6">
+        {/* 顶部导航 */}
+        <div className="flex items-center gap-4 mb-4">
           <button
             onClick={onBack}
-            className="flex items-center gap-2 text-radar-muted hover:text-white transition-colors bg-radar-card/50 px-4 py-2 rounded-lg"
+            className="flex items-center gap-2 text-radar-muted hover:text-white bg-radar-card/50 px-3 py-1.5 rounded-lg text-sm"
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            返回总览
+            ← 返回总览
           </button>
         </div>
         
-        {/* 板块头部 */}
-        <div className="bg-radar-card rounded-xl p-6 mb-6 border border-radar-border/50">
-          <div className="flex items-start justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <span className="text-5xl filter drop-shadow-lg">{sector.icon}</span>
-              <div>
-                <h2 className="font-display text-3xl font-bold text-white mb-1">
-                  {sector.name}
-                </h2>
-                <p className="text-sm text-radar-muted">{sector.description}</p>
-              </div>
-            </div>
+        {/* 板块头部信息 (手机端简化) */}
+        <div className="bg-radar-card rounded-xl p-5 mb-6 border border-radar-border/50">
+          <div className="flex items-center gap-3 mb-4">
+             <span className="text-4xl">{sector.icon}</span>
+             <div>
+               <h2 className="font-display text-2xl font-bold text-white">{sector.name}</h2>
+               <p className="text-xs text-radar-muted">{sector.description}</p>
+             </div>
           </div>
           
-          {/* 锚定ETF */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* ETF卡片网格 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {sector.etfs.map(etf => {
               const data = etfData[etf.symbol];
               const change = data?.dayChangePercent;
               const changeClass = change > 0 ? 'text-radar-up' : change < 0 ? 'text-radar-down' : 'text-radar-muted';
               
               return (
-                <div key={etf.symbol} className="bg-radar-bg rounded-lg p-5 border border-radar-border/30 hover:border-radar-border transition-colors">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                          <span className="font-mono text-xl font-bold text-white">{etf.symbol}</span>
-                          <span className="text-xs bg-radar-border/50 px-1.5 py-0.5 rounded text-radar-muted">{data?.nameCN || etf.name}</span>
-                      </div>
+                <div key={etf.symbol} className="bg-radar-bg/50 rounded-lg p-3 flex items-center justify-between border border-radar-border/30">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white">{etf.symbol}</span>
+                      <span className="text-[10px] bg-white/10 px-1 rounded text-radar-muted">{data?.nameCN || etf.name}</span>
                     </div>
-                    <button
-                      onClick={() => handleOpenYahoo(etf.symbol)}
-                      className="text-radar-muted hover:text-white"
-                      title="View on Yahoo"
-                    >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" strokeLinecap="round" strokeLinejoin="round"/>
-                        <polyline points="15,3 21,3 21,9" strokeLinecap="round" strokeLinejoin="round"/>
-                        <line x1="10" y1="14" x2="21" y2="3" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </button>
+                    <div className="text-xs text-radar-muted mt-1">
+                       52周回撤 <span className="text-orange-400">{data?.drawdown ? data.drawdown.toFixed(1) + '%' : '—'}</span>
+                    </div>
                   </div>
-                  
-                  <div className="flex items-baseline gap-4 mb-3">
-                    <span className="text-3xl font-bold text-white font-mono">{formatPrice(data?.price)}</span>
-                    <span className={`font-mono text-lg font-bold ${changeClass}`}>{formatPercent(change)}</span>
-                  </div>
-                  
-                  {/* 数据明细 - 修复显示 */}
-                  <div className="grid grid-cols-3 gap-2 text-xs bg-black/20 p-2 rounded-lg">
-                    <div className="flex flex-col">
-                        <span className="text-radar-muted mb-1">日涨跌</span>
-                        <span className={`font-mono font-bold ${data?.dayChangePercent > 0 ? 'text-radar-up' : 'text-radar-down'}`}>
-                            {formatPercent(data?.dayChangePercent)}
-                        </span>
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-radar-muted mb-1">周涨跌</span>
-                        <span className={`font-mono font-bold ${data?.weekChangePercent > 0 ? 'text-radar-up' : 'text-radar-down'}`}>
-                            {formatPercent(data?.weekChangePercent)}
-                        </span>
-                    </div>
-                     <div className="flex flex-col">
-                        <span className="text-radar-muted mb-1">回撤</span>
-                        <span className="font-mono text-orange-400 font-bold">
-                            {data?.drawdown ? data.drawdown.toFixed(2) + '%' : '—'}
-                        </span>
-                    </div>
+                  <div className="text-right">
+                    <div className="text-lg font-mono font-bold text-white">{formatPrice(data?.price)}</div>
+                    <div className={`font-mono text-sm font-bold ${changeClass}`}>{formatPercent(change)}</div>
                   </div>
                 </div>
               );
@@ -185,66 +154,65 @@ const SectorDetail = ({
           </div>
         </div>
         
-        {/* 股票池列表 */}
-        <div className="bg-radar-card rounded-xl p-6 border border-radar-border/50">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h3 className="font-display text-xl font-bold text-white mb-1">精选标的池</h3>
-              <p className="text-sm text-radar-muted">共 {stocks.length} 只 • 点击代码查看详情</p>
-            </div>
-            
-            <form onSubmit={handleAddStock} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={newSymbol}
-                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-                placeholder="输入代码 (如 NVDA)"
-                className="w-48 bg-radar-bg border border-radar-border rounded-lg px-3 py-2 text-white focus:outline-none focus:border-radar-accent"
-              />
-              <button type="submit" className="bg-radar-accent hover:bg-radar-accent/80 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                添加
-              </button>
-            </form>
+        {/* 股票池列表区域 */}
+        <div className="bg-radar-card rounded-xl border border-radar-border/50 overflow-hidden">
+          {/* 工具栏：添加与筛选 */}
+          <div className="p-4 border-b border-radar-border/30 flex flex-col gap-4">
+             <div className="flex justify-between items-center">
+                <h3 className="font-bold text-white text-lg">精选标的 ({stocks.length})</h3>
+                <form onSubmit={handleAddStock} className="flex gap-2">
+                  <input
+                    type="text" value={newSymbol} onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                    placeholder="代码"
+                    className="w-20 bg-radar-bg border border-radar-border rounded px-2 py-1 text-sm text-white focus:outline-none"
+                  />
+                  <button type="submit" className="bg-radar-accent px-3 py-1 rounded text-sm text-white font-bold">+</button>
+                </form>
+             </div>
+             
+             {/* 筛选按钮组 */}
+             <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-radar-muted text-xs">回撤筛选:</span>
+                {[0, 10, 20, 30].map(v => (
+                  <button key={v} onClick={() => setFilterDrawdown(v)}
+                    className={`px-2 py-0.5 rounded text-xs transition-colors border ${
+                      filterDrawdown === v 
+                        ? 'bg-radar-accent border-radar-accent text-white' 
+                        : 'bg-transparent border-radar-border text-radar-muted'
+                    }`}
+                  >
+                    {v === 0 ? '全部' : `>${v}%`}
+                  </button>
+                ))}
+             </div>
           </div>
           
-          {/* 列表头部 */}
-          {stocks.length > 0 && (
-            <div className="grid grid-cols-12 gap-4 py-3 px-4 text-xs font-bold text-radar-muted border-b border-radar-border uppercase tracking-wider">
-              <div onClick={() => handleSort('symbol')} className="col-span-3 cursor-pointer hover:text-white flex items-center gap-1">
-                 代码/名称 {sortBy === 'symbol' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </div>
-              <div className="col-span-2 text-right">价格</div>
-              <div onClick={() => handleSort('dayChange')} className="col-span-2 text-right cursor-pointer hover:text-white">
-                 日涨跌 {sortBy === 'dayChange' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </div>
-              <div onClick={() => handleSort('monthChange')} className="col-span-2 text-right cursor-pointer hover:text-white hidden md:block">
-                 月涨跌 {sortBy === 'monthChange' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </div>
-              <div onClick={() => handleSort('drawdown')} className="col-span-2 text-right cursor-pointer hover:text-white hidden lg:block">
-                 52周回撤 {sortBy === 'drawdown' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </div>
-              <div className="col-span-1"></div>
-            </div>
-          )}
+          {/* 表头：支持点击排序 */}
+          <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-black/20 text-xs text-radar-muted font-bold border-b border-radar-border/30">
+            <div className="col-span-4 md:col-span-3"><SortHeader field="symbol" label="名称/代码" align="left"/></div>
+            <div className="col-span-4 md:col-span-2 text-right"><SortHeader field="price" label="价格" /></div>
+            <div className="col-span-4 md:col-span-2 text-right"><SortHeader field="dayChange" label="日涨跌" /></div>
+            {/* 以下两列在手机上隐藏 */}
+            <div className="hidden md:block md:col-span-2 text-right">月涨跌</div>
+            <div className="hidden md:block md:col-span-2 text-right"><SortHeader field="drawdown" label="回撤" /></div>
+            <div className="hidden md:block md:col-span-1"></div>
+          </div>
           
-          {/* 列表内容 - 注入中文名逻辑 */}
-          <div className="divide-y divide-radar-border/30">
-            {sortedStocks.map(symbol => {
-               const data = stockData[symbol];
-               // 注入中文名 (从 data 获取，或者显示代码)
-               const displayName = data?.nameCN || symbol;
-               
-               return (
+          {/* 列表内容 */}
+          <div className="divide-y divide-radar-border/20">
+            {sortedStocks.map(symbol => (
                 <StockRow
                   key={symbol}
                   symbol={symbol}
-                  displayName={displayName} // 传给 StockRow
-                  data={data} // 包含修正后的涨跌幅
+                  displayName={stockData[symbol]?.nameCN} // 传入中文名
+                  data={stockData[symbol]}
                   onRemove={(s) => onRemoveStock(sectorId, s)}
                   onOpenYahoo={handleOpenYahoo}
                 />
-               );
-            })}
+            ))}
+            {sortedStocks.length === 0 && (
+                <div className="p-8 text-center text-radar-muted text-sm">暂无符合条件的股票</div>
+            )}
           </div>
         </div>
       </div>
