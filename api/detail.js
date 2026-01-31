@@ -1,87 +1,87 @@
 // api/detail.js
-// V3.6 终极修复版：增加浏览器伪装 (User-Agent) 防止 Yahoo 拦截
+// V4.0 核弹级修复：使用 yahoo-finance2 库进行正规调用
+// 自动处理 Crumb 和 Cookie，解决“数据加载受限”问题
+
+import yahooFinance from 'yahoo-finance2';
 
 export default async function handler(req, res) {
-  // 1. 允许跨域
+  // 1. 跨域设置
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
-  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
   const { symbol } = req.query;
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 2. 构造请求 URL (一次性请求所有可能用到的模块)
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail,summaryProfile,assetProfile,defaultKeyStatistics`;
-    
-    // 3. 【关键修复】伪装成浏览器，防止 Yahoo 拦截 (403 Forbidden)
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-      }
+    // 2. 抑制控制台警告 (库的一个小癖好)
+    yahooFinance.suppressNotices(['yahooSurvey']);
+
+    // 3. 使用库请求 quoteSummary (包含简介、价格、核心指标)
+    // 这个库会自动处理反爬验证
+    const result = await yahooFinance.quoteSummary(symbol, {
+      modules: ['price', 'summaryProfile', 'summaryDetail', 'defaultKeyStatistics', 'assetProfile']
     });
 
-    if (!response.ok) {
-      throw new Error(`Yahoo API rejected: ${response.status}`);
-    }
+    if (!result) throw new Error('No data returned');
 
-    const data = await response.json();
-    const result = data.quoteSummary?.result?.[0];
-
-    if (!result) throw new Error('No data found structure');
-
-    // 4. 智能提取 (兼容 股票 vs ETF)
-    
-    // 简介：股票在 summaryProfile，ETF 在 assetProfile
-    const profile = result.summaryProfile || result.assetProfile || {};
-    const description = profile.longBusinessSummary || '暂无详细介绍';
-    const sector = profile.sector || 'ETF/基金';
-    
-    // 价格 & 细节
+    // 4. 智能提取 (兼容 公司 vs ETF)
     const price = result.price || {};
+    const profile = result.summaryProfile || result.assetProfile || {};
     const detail = result.summaryDetail || {};
     const stats = result.defaultKeyStatistics || {};
 
-    // 5. 组装数据 (所有字段加空值保护)
+    // 5. 组装数据 (空值保护)
     const cleanData = {
       symbol: symbol,
       name: price.shortName || price.longName || symbol,
-      description: description,
-      sector: sector,
+      // 如果没有简介，显示友好提示
+      description: profile.longBusinessSummary || '暂无详细简介',
+      sector: profile.sector || 'ETF/基金',
       industry: profile.industry || '投资工具',
       
       // 价格
-      currentPrice: price.regularMarketPrice?.fmt || '—',
+      currentPrice: price.regularMarketPrice ? price.regularMarketPrice.toFixed(2) : '—',
       currency: price.currencySymbol || '$',
       
-      // 核心指标 (优先取 format 后的值)
-      marketCap: price.marketCap?.fmt || detail.totalAssets?.fmt || '—', // 股票看市值，ETF看净资产
-      peRatio: detail.trailingPE?.fmt || '—',
-      eps: stats.trailingEps?.fmt || '—',
-      dividendYield: detail.dividendYield?.fmt || detail.yield?.fmt || '—',
-      high52: detail.fiftyTwoWeekHigh?.fmt || '—',
-      low52: detail.fiftyTwoWeekLow?.fmt || '—'
+      // 核心指标 (库返回的是原始数字，我们需要手动加单位)
+      // 使用 helper 函数格式化大数字
+      marketCap: formatNumber(price.marketCap || detail.totalAssets),
+      peRatio: detail.trailingPE ? detail.trailingPE.toFixed(2) : '—',
+      dividendYield: detail.dividendYield ? (detail.dividendYield * 100).toFixed(2) + '%' : (detail.yield ? (detail.yield * 100).toFixed(2) + '%' : '—'),
+      high52: detail.fiftyTwoWeekHigh ? detail.fiftyTwoWeekHigh.toFixed(2) : '—',
+      low52: detail.fiftyTwoWeekLow ? detail.fiftyTwoWeekLow.toFixed(2) : '—'
     };
 
     res.status(200).json(cleanData);
 
   } catch (error) {
-    console.error(`Detail fetch error for ${symbol}:`, error);
-    
-    // 6. 降级方案：如果详情 API 彻底失败，返回一个只有名字的“空卡片”，不要让前端崩掉
+    console.error(`Detail fetch failed for ${symbol}:`, error);
     res.status(200).json({
       symbol: symbol,
       name: symbol,
-      description: "数据加载受限 (Yahoo API)，请稍后重试或直接访问 Yahoo Finance。",
-      sector: "未知",
+      // 这里的错误信息会显示在弹窗里
+      description: "数据源暂时拥堵，请稍后再试。", 
       currentPrice: "—",
-      marketCap: "—",
-      error: false // 标记为非致命错误，让弹窗能显示出来
+      error: true
     });
   }
+}
+
+// 辅助：大数字格式化 (比如 1.2T, 50B)
+function formatNumber(num) {
+  if (!num) return '—';
+  if (num > 1e12) return (num / 1e12).toFixed(2) + 'T'; // 万亿
+  if (num > 1e9) return (num / 1e9).toFixed(2) + 'B';  // 十亿
+  if (num > 1e6) return (num / 1e6).toFixed(2) + 'M';  // 百万
+  return num.toLocaleString();
 }
