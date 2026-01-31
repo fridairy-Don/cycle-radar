@@ -1,25 +1,20 @@
 import React from 'react';
 
-// === 冷热判断逻辑优化 ===
-// 逻辑：看龙头的回撤幅度 (Drawdown)
-// 回撤 < 5% = 🔥 热 (接近新高)
-// 回撤 > 15% = ❄️ 冷 (超跌)
-// 其他 = ☁️ 温
+// === 辅助函数 ===
 const getTemperature = (etfs, etfData) => {
-  if (!etfs || etfs.length === 0) return { label: '—', class: 'tag-warm' };
+  if (!etfs || etfs.length === 0) return { label: '—', class: 'text-radar-muted bg-radar-border/30' };
   
-  // 取第一个 ETF (通常是板块龙头, 如 XLE) 的数据
   const mainETF = etfs[0].symbol;
   const data = etfData[mainETF];
 
-  if (!data || data.drawdown === undefined) return { label: '—', class: 'tag-warm' };
+  if (!data || data.drawdown === undefined) return { label: '—', class: 'text-radar-muted bg-radar-border/30' };
 
-  // 注意：API 返回的 drawdown 是负数 (如 -3.5)
   const dd = Math.abs(data.drawdown);
 
-  if (dd < 5) return { label: '热', class: 'tag-hot' }; // 接近新高
-  if (dd > 15) return { label: '冷', class: 'tag-cold' }; // 跌多了
-  return { label: '温', class: 'tag-warm' };
+  // 优化后的冷热样式：使用小圆点+文字
+  if (dd < 5) return { label: '热', class: 'text-orange-400 bg-orange-400/10 border-orange-400/20' }; 
+  if (dd > 15) return { label: '冷', class: 'text-blue-400 bg-blue-400/10 border-blue-400/20' }; 
+  return { label: '温', class: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' };
 };
 
 const formatPercent = (value) => {
@@ -37,49 +32,72 @@ const SectorCard = ({ sector, etfData, stockCount, onClick, isLast }) => {
   const temp = getTemperature(sector.etfs, etfData);
   
   return (
-    <div className="relative flex items-center">
+    <div className="relative flex items-center h-full">
+      {/* === 卡片容器 ===
+         w-[85vw]: 手机上宽度占屏幕 85%，露出一点下一张卡片
+         md:w-[260px]: 电脑上固定宽度
+      */}
       <div 
         onClick={onClick}
-        className="sector-card bg-radar-card rounded-xl p-4 cursor-pointer min-w-[220px] hover:bg-radar-card/80 transition-all border border-transparent hover:border-radar-accent/30"
+        className="
+          w-[88vw] md:w-[280px] 
+          bg-radar-card/80 backdrop-blur-md 
+          rounded-2xl p-5 
+          cursor-pointer 
+          border border-radar-border/50 hover:border-radar-accent/50 
+          transition-all duration-300 shadow-xl
+          group relative overflow-hidden
+        "
       >
+        {/* 顶部发光背景特效 */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-radar-accent/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+
         {/* 头部：图标和温度 */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-3xl">{sector.icon}</span>
-          <span className={`tag ${temp.class} px-2 py-1 text-xs rounded font-bold`}>{temp.label}</span>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl filter drop-shadow-md">{sector.icon}</span>
+            <div>
+              <h3 className="font-display font-bold text-white text-lg leading-tight">
+                {sector.name}
+              </h3>
+              <p className="text-[10px] text-radar-muted font-mono uppercase tracking-wider">
+                {sector.nameEn}
+              </p>
+            </div>
+          </div>
+          <span className={`text-xs px-2 py-1 rounded-md border font-medium ${temp.class}`}>
+            {temp.label}
+          </span>
         </div>
         
-        {/* 板块名称 */}
-        <h3 className="font-display font-bold text-white text-lg mb-0.5">
-          {sector.name}
-        </h3>
-        <p className="text-xs text-radar-muted mb-4 font-mono opacity-70">
-          {sector.nameEn}
-        </p>
-        
-        {/* ETF 数据 (修正版) */}
-        <div className="space-y-3 mb-4">
+        {/* ETF 数据核心区域 */}
+        <div className="space-y-3 mb-5">
           {sector.etfs.map(etf => {
             const data = etfData[etf.symbol];
-            // 优先显示日涨跌 (Day Change)
             const change = data?.dayChangePercent;
-            const changeClass = change > 0 ? 'text-radar-up' : change < 0 ? 'text-radar-down' : 'text-radar-muted';
+            // 颜色逻辑
+            const changeColor = change > 0 ? 'text-radar-up' : change < 0 ? 'text-radar-down' : 'text-radar-muted';
+            const bgHover = change > 0 ? 'group-hover:bg-radar-up/5' : change < 0 ? 'group-hover:bg-radar-down/5' : '';
             
             return (
-              <div key={etf.symbol} className="flex items-center justify-between text-sm">
+              <div key={etf.symbol} className={`flex items-center justify-between p-2 -mx-2 rounded-lg transition-colors ${bgHover}`}>
+                {/* 左侧：代码和名称 */}
                 <div className="flex flex-col">
-                    <span className="font-mono font-bold text-white">{etf.symbol}</span>
-                    {/* 显示 ETF 中文名 (如果有) */}
-                    <span className="text-[10px] text-radar-muted">{data?.nameCN || etf.name || ''}</span>
+                    <div className="flex items-baseline gap-1.5">
+                        <span className="font-mono font-bold text-white text-sm">{etf.symbol}</span>
+                        <span className="text-[10px] text-radar-muted scale-90 origin-bottom-left">
+                            {data?.nameCN || etf.name}
+                        </span>
+                    </div>
                 </div>
+
+                {/* 右侧：价格和涨跌 */}
                 <div className="flex flex-col items-end">
-                  <span className="text-white font-medium font-mono text-base">
+                  <span className="text-white font-medium font-mono text-sm tracking-tight">
                     {formatPrice(data?.price)}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-radar-muted">日</span>
-                    <span className={`font-mono text-xs font-bold ${changeClass}`}>
-                        {formatPercent(change)}
-                    </span>
+                  <div className={`font-mono text-xs font-bold ${changeColor}`}>
+                     {formatPercent(change)}
                   </div>
                 </div>
               </div>
@@ -87,19 +105,25 @@ const SectorCard = ({ sector, etfData, stockCount, onClick, isLast }) => {
           })}
         </div>
         
-        {/* 底部信息 */}
-        <div className="pt-3 border-t border-radar-border/50 flex justify-between text-xs items-center">
-           <span className="text-radar-muted">精选标的</span>
-           <span className="bg-radar-bg px-2 py-0.5 rounded text-white font-mono">{stockCount}</span>
+        {/* 底部信息栏 */}
+        <div className="pt-3 border-t border-radar-border/30 flex justify-between items-center">
+           <div className="flex items-center gap-1.5 text-xs text-radar-muted group-hover:text-white transition-colors">
+             <span>查看标的池</span>
+             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+             </svg>
+           </div>
+           <span className="bg-white/5 px-2 py-0.5 rounded text-[10px] text-radar-muted font-mono border border-white/5 group-hover:border-radar-accent/30 transition-colors">
+             {stockCount}
+           </span>
         </div>
       </div>
       
-      {/* 连接线 (保持不变) */}
+      {/* 箭头连接线 (仅桌面显示，手机上滑动不需要箭头) */}
       {!isLast && (
-        <div className="hidden lg:flex items-center mx-3">
-          <div className="w-8 h-[2px] bg-gradient-to-r from-radar-border to-transparent"></div>
-          <svg className="w-3 h-3 text-radar-border -ml-1" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
+        <div className="hidden md:flex items-center mx-2 text-radar-border/50">
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
         </div>
       )}
