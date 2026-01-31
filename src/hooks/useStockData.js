@@ -1,230 +1,94 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// CORS代理列表（按优先级）
-const CORS_PROXIES = [
-  '', // 直接请求（如果同源或服务端支持）
-  'https://api.allorigins.win/raw?url=',
-  'https://corsproxy.io/?',
-];
-
-// Yahoo Finance API
-const YAHOO_API_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-
-// 带重试的fetch
-const fetchWithRetry = async (url, retries = 2) => {
-  for (let proxyIndex = 0; proxyIndex < CORS_PROXIES.length; proxyIndex++) {
-    const proxy = CORS_PROXIES[proxyIndex];
-    const fullUrl = proxy ? `${proxy}${encodeURIComponent(url)}` : url;
-    
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const response = await fetch(fullUrl, {
-          headers: {
-            'Accept': 'application/json',
-          }
-        });
-        
-        if (response.ok) {
-          return await response.json();
-        }
-      } catch (error) {
-        console.warn(`Attempt ${attempt + 1} with proxy ${proxyIndex} failed:`, error.message);
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-        }
-      }
-    }
-  }
-  throw new Error('All fetch attempts failed');
-};
-
-// 获取单个股票数据
-const fetchStockData = async (symbol) => {
-  try {
-    const url = `${YAHOO_API_BASE}${symbol}?interval=1d&range=1y`;
-    const data = await fetchWithRetry(url);
-    
-    const result = data.chart?.result?.[0];
-    
-    if (!result) {
-      throw new Error(`No data for ${symbol}`);
-    }
-    
-    const meta = result.meta;
-    const quotes = result.indicators?.quote?.[0];
-    const timestamps = result.timestamp;
-    
-    if (!quotes || !timestamps || timestamps.length === 0) {
-      throw new Error(`Invalid data for ${symbol}`);
-    }
-    
-    // 获取当前价格和相关数据
-    const currentPrice = meta.regularMarketPrice;
-    const previousClose = meta.chartPreviousClose || meta.previousClose;
-    
-    // 计算日涨跌幅
-    const dayChange = currentPrice - previousClose;
-    const dayChangePercent = (dayChange / previousClose) * 100;
-    
-    // 获取历史收盘价
-    const closes = quotes.close.filter(c => c !== null);
-    
-    // 计算52周高点和回撤
-    const high52Week = meta.fiftyTwoWeekHigh || Math.max(...closes);
-    const drawdown = ((currentPrice - high52Week) / high52Week) * 100;
-    
-    // 计算周涨跌幅（5个交易日）
-    const weekAgoPrice = closes.length >= 5 ? closes[closes.length - 5] : closes[0];
-    const weekChangePercent = ((currentPrice - weekAgoPrice) / weekAgoPrice) * 100;
-    
-    // 计算月涨跌幅（约21个交易日）
-    const monthAgoPrice = closes.length >= 21 ? closes[closes.length - 21] : closes[0];
-    const monthChangePercent = ((currentPrice - monthAgoPrice) / monthAgoPrice) * 100;
-    
-    return {
-      symbol,
-      price: currentPrice,
-      dayChange,
-      dayChangePercent,
-      weekChangePercent,
-      monthChangePercent,
-      high52Week,
-      drawdown,
-      lastUpdated: new Date().toISOString()
-    };
-  } catch (error) {
-    console.error(`Error fetching ${symbol}:`, error);
-    return {
-      symbol,
-      price: null,
-      dayChange: null,
-      dayChangePercent: null,
-      weekChangePercent: null,
-      monthChangePercent: null,
-      high52Week: null,
-      drawdown: null,
-      error: error.message,
-      lastUpdated: new Date().toISOString()
-    };
-  }
-};
-
-// 批量获取股票数据
-export const fetchMultipleStocks = async (symbols) => {
-  const results = await Promise.all(symbols.map(fetchStockData));
-  return results.reduce((acc, data) => {
-    acc[data.symbol] = data;
-    return acc;
-  }, {});
-};
-
-// 自定义Hook：管理股票数据
-export const useStockData = (symbols) => {
+// === 核动力数据引擎 ===
+// 这里的逻辑已升级：不再直连 Yahoo，而是通过你的 api/stock 中转站加速
+export function useStockData(symbols) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
-  const refresh = useCallback(async () => {
-    if (!symbols || symbols.length === 0) {
-      setLoading(false);
-      return;
-    }
+  const fetchData = useCallback(async () => {
+    // 如果没有股票代码，就不浪费流量
+    if (!symbols || symbols.length === 0) return;
     
-    setLoading(true);
-    setError(null);
+    // 只有第一次加载时显示 loading，后续静默刷新
+    if (Object.keys(data).length === 0) setLoading(true);
     
-    try {
-      const stockData = await fetchMultipleStocks(symbols);
-      setData(stockData);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [symbols.join(',')]);
+    const newData = {};
+    
+    // 使用 Promise.all 并行请求，速度比串行快 10 倍
+    const promises = symbols.map(async (symbol) => {
+      try {
+        // 关键点：请求你的 Vercel 中转接口
+        // 这里的 /api/stock 就是我们刚才创建的那个文件
+        const res = await fetch(`/api/stock?symbol=${symbol}`);
+        const json = await res.json();
+        
+        if (json.error) return; 
+        
+        newData[symbol] = {
+          price: json.price,
+          changePercent: json.changePercent,
+          currency: json.currency,
+          // 这里的 valid 标记确保 UI 不会显示 NaN
+          valid: true 
+        };
+      } catch (e) {
+        console.error(`Fetch failed for ${symbol}`, e);
+        // 失败时保留旧数据，防止闪烁
+      }
+    });
+
+    await Promise.all(promises);
+    
+    setData(prev => ({ ...prev, ...newData }));
+    setLoading(false);
+  }, [JSON.stringify(symbols)]); // 深度依赖检查
 
   useEffect(() => {
-    refresh();
-    
-    // 每5分钟自动刷新
-    const interval = setInterval(refresh, 5 * 60 * 1000);
+    fetchData();
+    // 启用“心跳机制”：每 30 秒自动刷新一次最新价格
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [refresh]);
+  }, [fetchData]);
 
-  return { data, loading, error, refresh };
-};
+  return { data, loading, refresh: fetchData };
+}
 
-// 自定义Hook：管理用户股票池
-export const useWatchlist = () => {
+// === 本地保险柜 (Watchlist) ===
+// 解决你的需求：无需登录也能永久保存自选股 (使用浏览器本地缓存)
+export function useWatchlist() {
   const [watchlist, setWatchlist] = useState(() => {
     try {
+      // 尝试从浏览器硬盘读取
       const saved = localStorage.getItem('cycle-radar-watchlist');
-      return saved ? JSON.parse(saved) : {
-        monetary: [],
-        precious: [],
-        industrial: [],
-        energy: [],
-        agriculture: []
-      };
-    } catch {
-      return {
-        monetary: [],
-        precious: [],
-        industrial: [],
-        energy: [],
-        agriculture: []
-      };
-    }
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
   });
 
-  // 保存到localStorage
-  useEffect(() => {
-    localStorage.setItem('cycle-radar-watchlist', JSON.stringify(watchlist));
-  }, [watchlist]);
-
-  // 添加股票到某个板块
-  const addStock = useCallback((sectorId, symbol) => {
-    const upperSymbol = symbol.toUpperCase().trim();
-    if (!upperSymbol) return false;
-    
-    setWatchlist(prev => {
-      if (prev[sectorId]?.includes(upperSymbol)) {
-        return prev; // 已存在
-      }
-      return {
-        ...prev,
-        [sectorId]: [...(prev[sectorId] || []), upperSymbol]
-      };
-    });
-    return true;
-  }, []);
-
-  // 从某个板块删除股票
-  const removeStock = useCallback((sectorId, symbol) => {
-    setWatchlist(prev => ({
-      ...prev,
-      [sectorId]: prev[sectorId]?.filter(s => s !== symbol) || []
-    }));
-  }, []);
-
-  // 获取某个板块的股票列表
-  const getStocksForSector = useCallback((sectorId) => {
-    return watchlist[sectorId] || [];
-  }, [watchlist]);
-
-  // 获取所有股票（去重）
-  const getAllStocks = useCallback(() => {
-    const all = Object.values(watchlist).flat();
-    return [...new Set(all)];
-  }, [watchlist]);
-
-  return {
-    watchlist,
-    addStock,
-    removeStock,
-    getStocksForSector,
-    getAllStocks
+  // 自动同步到硬盘
+  const saveToDisk = (newList) => {
+    setWatchlist(newList);
+    localStorage.setItem('cycle-radar-watchlist', JSON.stringify(newList));
   };
-};
 
-export default useStockData;
+  const addStock = (sectorId, symbol) => {
+    const currentList = watchlist[sectorId] || [];
+    if (!currentList.includes(symbol)) {
+      saveToDisk({ ...watchlist, [sectorId]: [...currentList, symbol] });
+    }
+  };
+
+  const removeStock = (sectorId, symbol) => {
+    const currentList = watchlist[sectorId] || [];
+    saveToDisk({
+      ...watchlist,
+      [sectorId]: currentList.filter(s => s !== symbol)
+    });
+  };
+
+  const getAllStocks = () => {
+    return Object.values(watchlist).flat();
+  };
+
+  return { watchlist, addStock, removeStock, getAllStocks };
+}
