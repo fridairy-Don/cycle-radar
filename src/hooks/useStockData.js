@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// === 数据获取 Hook (改为调用 api/stock) ===
+// === 数据获取 Hook (保持之前的修复版不动) ===
 export const useStockData = (symbols) => {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -12,33 +12,24 @@ export const useStockData = (symbols) => {
       return;
     }
     
-    // 如果是首次加载，显示 loading；如果是刷新，静默更新
+    // 首次加载显示loading，后续静默刷新
     if (Object.keys(data).length === 0) setLoading(true);
     setError(null);
     
     try {
       const newData = {};
-      
-      // 并行请求你的 Vercel 后端接口
       const promises = symbols.map(async (symbol) => {
         try {
-          // 这里不再连 Yahoo，而是连你的 API
           const res = await fetch(`/api/stock?symbol=${symbol}`);
           const json = await res.json();
-          
-          if (json.error) return; // 跳过错误的
-          
-          // 直接存入数据，字段名与 Claude 原版完全一致
+          if (json.error) return;
           newData[symbol] = json;
-          
         } catch (e) {
           console.error(`Fetch error for ${symbol}`, e);
         }
       });
 
       await Promise.all(promises);
-      
-      // 合并新数据
       setData(prev => ({ ...prev, ...newData }));
       
     } catch (err) {
@@ -46,11 +37,10 @@ export const useStockData = (symbols) => {
     } finally {
       setLoading(false);
     }
-  }, [JSON.stringify(symbols)]); // 深度依赖
+  }, [JSON.stringify(symbols)]);
 
   useEffect(() => {
     refresh();
-    // 每 30 秒自动刷新一次 (比 Claude 原版 5分钟更快)
     const interval = setInterval(refresh, 30 * 1000);
     return () => clearInterval(interval);
   }, [refresh]);
@@ -58,26 +48,63 @@ export const useStockData = (symbols) => {
   return { data, loading, error, refresh };
 };
 
-// === 下面是原封不动的 Watchlist 逻辑 (为了保持你的收藏夹功能) ===
+// === 预设的“豪华演示”股票池 ===
+const DEFAULT_STOCKS = {
+  // 1. 货币/避险: 你的核心关注 (BTC/MSTR) + 传统避险
+  monetary: [
+    'MSTR', 'COIN', 'GBTC', 'IBIT',  // 币圈核心
+    'TLT', 'IEF', 'SHY',             // 美债三兄弟
+    'JPM', 'BAC', 'GS', 'MS',        // 银行巨头
+    'BLK', 'V', 'MA', 'PYPL'         // 金融基建
+  ],
+  // 2. 贵金属: 黄金白银矿企
+  precious: [
+    'NEM', 'GOLD', 'AEM', 'FNV', 'WPM', // 黄金巨头
+    'PAAS', 'HL', 'AG', 'CDE',          // 白银与小矿
+    'KGC', 'AU', 'GFI', 'IAG', 'NG', 'SIL'
+  ],
+  // 3. 工业金属: 铜铝锂 (AI与电力的基础)
+  industrial: [
+    'FCX', 'SCCO', 'TECK',              // 铜三巨头
+    'VALE', 'RIO', 'BHP',               // 综合矿业
+    'AA', 'CENX',                       // 铝
+    'ALB', 'SQM', 'LTHM',               // 锂 (新能源)
+    'X', 'NUE', 'STLD', 'CLF'           // 钢铁
+  ],
+  // 4. 能源: 石油天然气
+  energy: [
+    'XOM', 'CVX', 'COP',                // 美国石油三巨头
+    'SHELL', 'TTE', 'BP',               // 欧洲巨头
+    'OXY', 'EOG', 'PXD', 'DVN',         // 页岩油/巴菲特概念
+    'SLB', 'HAL', 'BKR',                // 油服
+    'MPC', 'PSX'                        // 炼化
+  ],
+  // 5. 农业: 粮食安全
+  agriculture: [
+    'DE', 'CAT', 'AGCO',                // 农机
+    'ADM', 'BG',                        // 四大粮商
+    'NTR', 'MOS', 'CF', 'ICL',          // 化肥
+    'TSN', 'GIS', 'K', 'CAG', 'SJM',    // 食品加工
+    'FDP'
+  ]
+};
+
+// === 用户股票池 Hook (修改了初始化逻辑) ===
 export const useWatchlist = () => {
   const [watchlist, setWatchlist] = useState(() => {
     try {
       const saved = localStorage.getItem('cycle-radar-watchlist');
-      return saved ? JSON.parse(saved) : {
-        monetary: [],
-        precious: [],
-        industrial: [],
-        energy: [],
-        agriculture: []
-      };
+      // 关键修改：如果本地没有存过(或者原本是空的)，就载入上面的 DEFAULT_STOCKS
+      // 这样演示的时候一打开就是满的
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // 简单检查一下是否为空对象，如果是空的，也给默认值
+        const isEmpty = Object.values(parsed).every(arr => arr.length === 0);
+        return isEmpty ? DEFAULT_STOCKS : parsed;
+      }
+      return DEFAULT_STOCKS;
     } catch {
-      return {
-        monetary: [],
-        precious: [],
-        industrial: [],
-        energy: [],
-        agriculture: []
-      };
+      return DEFAULT_STOCKS;
     }
   });
 
