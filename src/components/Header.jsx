@@ -5,9 +5,9 @@ const Header = ({ onRefresh, loading, onGoHome }) => {
     <header className="border-b border-radar-border bg-radar-card/50 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          {/* Logo 和标题 - 增加点击返回首页功能 */}
+          {/* Logo 和标题 */}
           <div 
-            onClick={onGoHome} // <--- 关键修改：点击触发回家
+            onClick={onGoHome}
             className="flex items-center gap-4 cursor-pointer active:scale-95 transition-transform group"
           >
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-radar-accent to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover:shadow-orange-500/40 transition-shadow">
@@ -19,18 +19,18 @@ const Header = ({ onRefresh, loading, onGoHome }) => {
               </svg>
             </div>
             <div>
-              <h1 className="font-display text-xl font-bold text-white tracking-tight leading-none mb-0.5">
+              <h1 className="font-display text-xl font-bold text-white tracking-tight leading-none mb-1">
                 Cycle Radar
               </h1>
-              <p className="text-[10px] text-radar-muted uppercase tracking-wider font-mono">
-                Global Macro V3
+              {/* 改回原版文案 */}
+              <p className="text-xs text-radar-muted font-medium">
+                周期传导链 · 股票仓库
               </p>
             </div>
           </div>
 
           {/* 右侧操作 */}
           <div className="flex items-center gap-4">
-            {/* 刷新按钮 */}
             <button
               onClick={onRefresh}
               disabled={loading}
@@ -46,7 +46,7 @@ const Header = ({ onRefresh, loading, onGoHome }) => {
                 <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M21 3v5h-5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="hidden md:inline">{loading ? '更新中...' : '刷新'}</span>
+              <span className="hidden md:inline">{loading ? '刷新中...' : '刷新数据'}</span>
             </button>
           </div>
         </div>
