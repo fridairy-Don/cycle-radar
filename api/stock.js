@@ -1,9 +1,8 @@
 // api/stock.js
-// 修复版：严格对齐 Claude 原版 UI 需求
-// 包含：日涨跌、周涨跌、月涨跌、52周回撤、热度数据
+// 修复目标：完美复刻 Claude 前端的计算逻辑，但放在服务端执行以加速
 
 export default async function handler(req, res) {
-  // 1. CORS 允许跨域 (国内访问必须)
+  // 1. 设置跨域，允许国内访问
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
@@ -21,7 +20,7 @@ export default async function handler(req, res) {
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 关键修正：请求 3个月 (3mo) 数据，确保能算出“月涨跌”
+    // 请求 3个月数据 (足够计算日、周、月涨跌)
     const response = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=3mo`
     );
@@ -32,53 +31,55 @@ export default async function handler(req, res) {
     }
 
     const result = data.chart.result[0];
-    const quote = result.meta;
-    const closes = result.indicators.quote[0].close || [];
-
-    // --- 核心计算 (服务端算好，减轻前端负担) ---
+    const meta = result.meta;
+    const quotes = result.indicators.quote[0];
     
-    // 1. 获取价格 (优先用收盘价序列，防止 meta 数据延迟)
-    // 过滤掉 null 值 (Yahoo 有时会返回 null)
-    const validCloses = closes.filter(c => c !== null);
-    const currentPrice = validCloses[validCloses.length - 1];
-    const prevClose = validCloses[validCloses.length - 2];
+    // 过滤掉无效数据 (null)
+    const closes = quotes.close.filter(c => c !== null);
 
-    // 2. 52周数据 (用于计算热度/回撤)
-    const high52 = quote.fiftyTwoWeekHigh || Math.max(...validCloses);
-    const low52 = quote.fiftyTwoWeekLow || Math.min(...validCloses);
+    if (closes.length === 0) throw new Error('No valid closes');
 
-    // 3. 计算涨跌幅
-    // 日涨跌
-    const dayChange = ((currentPrice - prevClose) / prevClose); // 小数格式，前端会转百分比
+    // === 复刻 Claude 的核心算法 ===
 
-    // 周涨跌 (往前找 5 个交易日)
-    let weekChange = 0;
-    if (validCloses.length >= 6) {
-        const price5dAgo = validCloses[validCloses.length - 6];
-        weekChange = ((currentPrice - price5dAgo) / price5dAgo);
+    // 1. 当前价格 & 昨收
+    const currentPrice = meta.regularMarketPrice || closes[closes.length - 1];
+    const prevClose = meta.chartPreviousClose || meta.previousClose || closes[closes.length - 2];
+
+    // 2. 日涨跌 (Day Change)
+    const dayChange = currentPrice - prevClose;
+    const dayChangePercent = ((dayChange / prevClose) * 100);
+
+    // 3. 52周极值 & 回撤 (Drawdown)
+    // 优先用 meta 数据，如果没有则用 3个月内的最高价代替 (误差极小)
+    const high52Week = meta.fiftyTwoWeekHigh || Math.max(...closes);
+    const drawdown = ((currentPrice - high52Week) / high52Week) * 100;
+
+    // 4. 周涨跌 (5个交易日)
+    let weekChangePercent = 0;
+    if (closes.length >= 6) {
+        const weekAgoPrice = closes[closes.length - 6];
+        weekChangePercent = ((currentPrice - weekAgoPrice) / weekAgoPrice) * 100;
     }
 
-    // 月涨跌 (往前找 21 个交易日)
-    let monthChange = 0;
-    if (validCloses.length >= 22) {
-        const priceMonthAgo = validCloses[validCloses.length - 22];
-        monthChange = ((currentPrice - priceMonthAgo) / priceMonthAgo);
+    // 5. 月涨跌 (21个交易日)
+    let monthChangePercent = 0;
+    if (closes.length >= 22) {
+        const monthAgoPrice = closes[closes.length - 22];
+        monthChangePercent = ((currentPrice - monthAgoPrice) / monthAgoPrice) * 100;
     }
 
-    // 回撤 (Drawdown)
-    const drawdown = high52 ? ((currentPrice - high52) / high52) : 0;
-
-    // --- 返回完整数据包 ---
+    // === 返回完全匹配前端 UI 的数据结构 ===
     res.status(200).json({
-      symbol: symbol,
+      symbol,
       price: currentPrice,
-      dayChange: dayChange,     // 日
-      weekChange: weekChange,   // 周
-      monthChange: monthChange, // 月
-      drawdown: drawdown,       // 回撤
-      high52: high52,
-      low52: low52,
-      currency: quote.currency
+      dayChange,
+      dayChangePercent,   // 关键字段：恢复红绿涨跌
+      weekChangePercent,  // 关键字段：恢复二级菜单周数据
+      monthChangePercent, // 关键字段：恢复二级菜单月数据
+      high52Week,
+      drawdown,           // 关键字段：恢复热度标签
+      currency: meta.currency,
+      lastUpdated: new Date().toISOString()
     });
 
   } catch (error) {
