@@ -1,10 +1,33 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// === 数据获取 Hook (保持之前的修复版不动) ===
+// === 1. 中文名称映射表 (只翻译核心的，其他的显示代码) ===
+const NAME_MAP = {
+  // 货币/避险
+  'MSTR': '微策(比特币)', 'COIN': 'Coinbase', 'GBTC': '灰度BTC', 'IBIT': '贝莱德BTC',
+  'TLT': '20年美债', 'IEF': '10年美债', 'SHY': '短期美债',
+  'JPM': '摩根大通', 'BAC': '美国银行', 'GS': '高盛', 'V': 'Visa',
+  'GLD': 'SPDR黄金', 'SLV': '白银ETF',
+  // 工业
+  'FCX': '自由港铜', 'SCCO': '南方铜业', 'TECK': '泰克资源', 'VALE': '淡水河谷',
+  'BHP': '必和必拓', 'AA': '美国铝业', 'ALB': '雅保锂业', 'SQM': '智利矿业',
+  'X': '美国钢铁', 'NUE': '纽克钢铁',
+  // 能源
+  'XOM': '埃克森美孚', 'CVX': '雪佛龙', 'COP': '康菲石油', 'SHELL': '壳牌',
+  'OXY': '西方石油', 'SLB': '斯伦贝谢', 'USO': '原油ETF',
+  // 农业
+  'DE': '约翰迪尔', 'CAT': '卡特彼勒', 'ADM': 'ADM粮商', 'MOS': '美盛化肥',
+  'DBA': '农产品ETF', 'MOO': '农业股ETF',
+  // 科技
+  'NVDA': '英伟达', 'MSFT': '微软', 'AAPL': '苹果', 'TSLA': '特斯拉', 'AMD': '超威'
+};
+
+// === 2. 强制刷新版本号 (改这个值，所有用户的缓存都会重置) ===
+const STORAGE_VERSION = 'v2_demo_reset'; 
+
+// === 3. 数据 Hook ===
 export const useStockData = (symbols) => {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   const refresh = useCallback(async () => {
     if (!symbols || symbols.length === 0) {
@@ -12,9 +35,8 @@ export const useStockData = (symbols) => {
       return;
     }
     
-    // 首次加载显示loading，后续静默刷新
+    // 只有首次无数据时显示 loading
     if (Object.keys(data).length === 0) setLoading(true);
-    setError(null);
     
     try {
       const newData = {};
@@ -23,17 +45,17 @@ export const useStockData = (symbols) => {
           const res = await fetch(`/api/stock?symbol=${symbol}`);
           const json = await res.json();
           if (json.error) return;
+          
+          // 注入中文名
+          json.nameCN = NAME_MAP[symbol] || json.shortName || symbol;
+          
           newData[symbol] = json;
         } catch (e) {
-          console.error(`Fetch error for ${symbol}`, e);
+          console.error(e);
         }
       });
-
       await Promise.all(promises);
       setData(prev => ({ ...prev, ...newData }));
-      
-    } catch (err) {
-      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -41,68 +63,38 @@ export const useStockData = (symbols) => {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 30 * 1000);
+    const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
   }, [refresh]);
 
-  return { data, loading, error, refresh };
+  return { data, loading, refresh };
 };
 
-// === 预设的“豪华演示”股票池 ===
+// === 4. 默认股票池 ===
 const DEFAULT_STOCKS = {
-  // 1. 货币/避险: 你的核心关注 (BTC/MSTR) + 传统避险
-  monetary: [
-    'MSTR', 'COIN', 'GBTC', 'IBIT',  // 币圈核心
-    'TLT', 'IEF', 'SHY',             // 美债三兄弟
-    'JPM', 'BAC', 'GS', 'MS',        // 银行巨头
-    'BLK', 'V', 'MA', 'PYPL'         // 金融基建
-  ],
-  // 2. 贵金属: 黄金白银矿企
-  precious: [
-    'NEM', 'GOLD', 'AEM', 'FNV', 'WPM', // 黄金巨头
-    'PAAS', 'HL', 'AG', 'CDE',          // 白银与小矿
-    'KGC', 'AU', 'GFI', 'IAG', 'NG', 'SIL'
-  ],
-  // 3. 工业金属: 铜铝锂 (AI与电力的基础)
-  industrial: [
-    'FCX', 'SCCO', 'TECK',              // 铜三巨头
-    'VALE', 'RIO', 'BHP',               // 综合矿业
-    'AA', 'CENX',                       // 铝
-    'ALB', 'SQM', 'LTHM',               // 锂 (新能源)
-    'X', 'NUE', 'STLD', 'CLF'           // 钢铁
-  ],
-  // 4. 能源: 石油天然气
-  energy: [
-    'XOM', 'CVX', 'COP',                // 美国石油三巨头
-    'SHELL', 'TTE', 'BP',               // 欧洲巨头
-    'OXY', 'EOG', 'PXD', 'DVN',         // 页岩油/巴菲特概念
-    'SLB', 'HAL', 'BKR',                // 油服
-    'MPC', 'PSX'                        // 炼化
-  ],
-  // 5. 农业: 粮食安全
-  agriculture: [
-    'DE', 'CAT', 'AGCO',                // 农机
-    'ADM', 'BG',                        // 四大粮商
-    'NTR', 'MOS', 'CF', 'ICL',          // 化肥
-    'TSN', 'GIS', 'K', 'CAG', 'SJM',    // 食品加工
-    'FDP'
-  ]
+  monetary: ['MSTR', 'COIN', 'IBIT', 'TLT', 'JPM', 'GLD'],
+  precious: ['NEM', 'GOLD', 'AEM', 'PAAS', 'AG', 'SLV'],
+  industrial: ['FCX', 'SCCO', 'BHP', 'VALE', 'AA', 'ALB'],
+  energy: ['XOM', 'CVX', 'OXY', 'SHELL', 'SLB', 'USO'],
+  agriculture: ['DE', 'CAT', 'ADM', 'MOS', 'NTR', 'DBA']
 };
 
-// === 用户股票池 Hook (修改了初始化逻辑) ===
+// === 5. Watchlist Hook (含强制刷新逻辑) ===
 export const useWatchlist = () => {
   const [watchlist, setWatchlist] = useState(() => {
     try {
-      const saved = localStorage.getItem('cycle-radar-watchlist');
-      // 关键修改：如果本地没有存过(或者原本是空的)，就载入上面的 DEFAULT_STOCKS
-      // 这样演示的时候一打开就是满的
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // 简单检查一下是否为空对象，如果是空的，也给默认值
-        const isEmpty = Object.values(parsed).every(arr => arr.length === 0);
-        return isEmpty ? DEFAULT_STOCKS : parsed;
+      // 检查版本号
+      const savedVersion = localStorage.getItem('radar_version');
+      const savedData = localStorage.getItem('cycle-radar-watchlist');
+      
+      // 如果版本不匹配，强制重置
+      if (savedVersion !== STORAGE_VERSION) {
+        localStorage.setItem('radar_version', STORAGE_VERSION);
+        localStorage.setItem('cycle-radar-watchlist', JSON.stringify(DEFAULT_STOCKS));
+        return DEFAULT_STOCKS;
       }
-      return DEFAULT_STOCKS;
+
+      return savedData ? JSON.parse(savedData) : DEFAULT_STOCKS;
     } catch {
       return DEFAULT_STOCKS;
     }
@@ -112,18 +104,15 @@ export const useWatchlist = () => {
     localStorage.setItem('cycle-radar-watchlist', JSON.stringify(watchlist));
   }, [watchlist]);
 
+  // ... (add/remove 方法保持不变，为了节省篇幅省略，但你复制时要保留) ...
+  // 为了方便你复制，我把 add/remove 完整写出来：
+  
   const addStock = useCallback((sectorId, symbol) => {
     const upperSymbol = symbol.toUpperCase().trim();
     if (!upperSymbol) return false;
-    
     setWatchlist(prev => {
-      if (prev[sectorId]?.includes(upperSymbol)) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [sectorId]: [...(prev[sectorId] || []), upperSymbol]
-      };
+      if (prev[sectorId]?.includes(upperSymbol)) return prev;
+      return { ...prev, [sectorId]: [...(prev[sectorId] || []), upperSymbol] };
     });
     return true;
   }, []);
@@ -144,13 +133,7 @@ export const useWatchlist = () => {
     return [...new Set(all)];
   }, [watchlist]);
 
-  return {
-    watchlist,
-    addStock,
-    removeStock,
-    getStocksForSector,
-    getAllStocks
-  };
+  return { watchlist, addStock, removeStock, getStocksForSector, getAllStocks };
 };
 
 export default useStockData;
