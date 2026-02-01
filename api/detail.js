@@ -1,5 +1,5 @@
 // api/detail.js
-// V7.0 直接调用 Yahoo Finance HTTP API (和 stock.js 一样稳定)
+// V8.0 使用和 stock.js 一样的 v8 chart API (最稳定)
 
 export default async function handler(req, res) {
   // 1. 跨域设置
@@ -17,53 +17,55 @@ export default async function handler(req, res) {
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 2. 使用 quoteSummary API 获取详细信息
-    const modules = 'price,summaryProfile,summaryDetail,assetProfile,defaultKeyStatistics';
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=${modules}`;
-
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-
+    // 2. 使用 v8 chart API (和 stock.js 一样)
+    const response = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
+    );
     const data = await response.json();
 
-    if (!data.quoteSummary || !data.quoteSummary.result || data.quoteSummary.result.length === 0) {
+    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
       throw new Error('No data found');
     }
 
-    const result = data.quoteSummary.result[0];
-    const price = result.price || {};
-    const profile = result.summaryProfile || result.assetProfile || {};
-    const detail = result.summaryDetail || {};
-    const stats = result.defaultKeyStatistics || {};
+    const result = data.chart.result[0];
+    const meta = result.meta;
+    const quotes = result.indicators.quote[0];
+    const closes = quotes.close.filter(c => c !== null);
 
-    // 3. 提取价格 (处理雅虎的嵌套格式)
-    const getVal = (obj) => obj?.raw ?? obj?.fmt ?? obj ?? null;
+    // 计算关键数据
+    const currentPrice = meta.regularMarketPrice || closes[closes.length - 1];
+    const prevClose = closes[closes.length - 2] || currentPrice;
+    const dayChange = currentPrice - prevClose;
+    const dayChangePercent = (dayChange / prevClose) * 100;
 
-    // 4. 组装数据
+    // 52周数据
+    const high52 = meta.fiftyTwoWeekHigh || Math.max(...closes);
+    const low52 = meta.fiftyTwoWeekLow || Math.min(...closes);
+    const drawdown = ((currentPrice - high52) / high52) * 100;
+
+    // 3. 组装数据
     const cleanData = {
       symbol: symbol,
-      name: price.shortName || price.longName || symbol,
-      description: profile.longBusinessSummary || '暂无详细简介',
-      sector: profile.sector || price.quoteType || 'ETF/基金',
-      industry: profile.industry || '—',
+      name: meta.shortName || meta.longName || symbol,
+      description: `${meta.shortName || symbol} - ${meta.exchangeName || '交易所'} · ${meta.instrumentType || '证券'}`,
+      sector: meta.instrumentType || 'ETF/基金',
+      industry: meta.exchangeName || '—',
 
       // 价格
-      currentPrice: getVal(price.regularMarketPrice)?.toFixed?.(2) || getVal(price.regularMarketPrice) || '—',
-      currency: price.currencySymbol || '$',
+      currentPrice: currentPrice?.toFixed(2) || '—',
+      currency: meta.currency === 'USD' ? '$' : (meta.currency || '$'),
 
       // 核心指标
-      marketCap: formatNumber(getVal(price.marketCap) || getVal(detail.totalAssets)),
-      peRatio: getVal(detail.trailingPE)?.toFixed?.(2) || getVal(stats.trailingPE)?.toFixed?.(2) || '—',
-      dividendYield: formatPercent(getVal(detail.dividendYield) || getVal(detail.yield)),
-      high52: getVal(detail.fiftyTwoWeekHigh)?.toFixed?.(2) || '—',
-      low52: getVal(detail.fiftyTwoWeekLow)?.toFixed?.(2) || '—',
+      marketCap: '—', // v8 API 不返回市值
+      peRatio: '—',   // v8 API 不返回 PE
+      dividendYield: '—',
+      high52: high52?.toFixed(2) || '—',
+      low52: low52?.toFixed(2) || '—',
 
       // 涨跌
-      dayChange: getVal(price.regularMarketChange)?.toFixed?.(2) || '—',
-      dayChangePercent: formatPercent(getVal(price.regularMarketChangePercent) / 100) || '—'
+      dayChange: dayChange?.toFixed(2) || '—',
+      dayChangePercent: dayChangePercent?.toFixed(2) + '%' || '—',
+      drawdown: drawdown?.toFixed(2) + '%' || '—'
     };
 
     res.status(200).json(cleanData);
@@ -80,19 +82,4 @@ export default async function handler(req, res) {
       errorDetail: error.message
     });
   }
-}
-
-// 大数字格式化
-function formatNumber(num) {
-  if (!num) return '—';
-  if (num > 1e12) return (num / 1e12).toFixed(2) + 'T';
-  if (num > 1e9) return (num / 1e9).toFixed(2) + 'B';
-  if (num > 1e6) return (num / 1e6).toFixed(2) + 'M';
-  return num.toLocaleString();
-}
-
-// 百分比格式化
-function formatPercent(num) {
-  if (!num && num !== 0) return '—';
-  return (num * 100).toFixed(2) + '%';
 }
