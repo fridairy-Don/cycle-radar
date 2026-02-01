@@ -22,10 +22,7 @@ export default async function handler(req, res) {
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 2. 抑制控制台警告
-    yahooFinance.suppressNotices(['yahooSurvey']);
-
-    // 3. 使用 quote 获取基础数据 (更稳定)
+    // 2. 使用 quote 获取基础数据 (更稳定)
     const quote = await yahooFinance.quote(symbol);
 
     // 4. 尝试获取详细信息 (可能失败，所以包在 try 里)
