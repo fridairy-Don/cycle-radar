@@ -1,8 +1,15 @@
 // api/detail.js
-// V4.0 核弹级修复：使用 yahoo-finance2 库进行正规调用
-// 自动处理 Crumb 和 Cookie，解决“数据加载受限”问题
+// V5.0 修复：配置 yahoo-finance2 解决 Vercel 环境问题
 
 import yahooFinance from 'yahoo-finance2';
+
+// 配置 yahoo-finance2 以适应 Vercel 环境
+yahooFinance.setGlobalConfig({
+  queue: {
+    concurrency: 1,
+    timeout: 30000
+  }
+});
 
 export default async function handler(req, res) {
   // 1. 跨域设置
@@ -23,56 +30,66 @@ export default async function handler(req, res) {
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 2. 抑制控制台警告 (库的一个小癖好)
+    // 2. 抑制控制台警告
     yahooFinance.suppressNotices(['yahooSurvey']);
 
-    // 3. 使用库请求 quoteSummary (包含简介、价格、核心指标)
-    // 这个库会自动处理反爬验证
-    const result = await yahooFinance.quoteSummary(symbol, {
-      modules: ['price', 'summaryProfile', 'summaryDetail', 'defaultKeyStatistics', 'assetProfile']
-    });
+    // 3. 使用 quote 获取基础数据 (更稳定)
+    const quote = await yahooFinance.quote(symbol);
 
-    if (!result) throw new Error('No data returned');
+    // 4. 尝试获取详细信息 (可能失败，所以包在 try 里)
+    let profile = {};
+    let detail = {};
+    try {
+      const summary = await yahooFinance.quoteSummary(symbol, {
+        modules: ['summaryProfile', 'summaryDetail', 'assetProfile']
+      });
+      profile = summary.summaryProfile || summary.assetProfile || {};
+      detail = summary.summaryDetail || {};
+    } catch (e) {
+      console.log('quoteSummary failed, using quote data only');
+    }
 
-    // 4. 智能提取 (兼容 公司 vs ETF)
-    const price = result.price || {};
-    const profile = result.summaryProfile || result.assetProfile || {};
-    const detail = result.summaryDetail || {};
-    const stats = result.defaultKeyStatistics || {};
+    if (!quote) throw new Error('No data returned');
 
-    // 5. 组装数据 (空值保护)
+    // 5. 组装数据 (优先使用 quote，detail 作为补充)
     const cleanData = {
       symbol: symbol,
-      name: price.shortName || price.longName || symbol,
-      // 如果没有简介，显示友好提示
+      name: quote.shortName || quote.longName || symbol,
       description: profile.longBusinessSummary || '暂无详细简介',
-      sector: profile.sector || 'ETF/基金',
-      industry: profile.industry || '投资工具',
-      
-      // 价格
-      currentPrice: price.regularMarketPrice ? price.regularMarketPrice.toFixed(2) : '—',
-      currency: price.currencySymbol || '$',
-      
-      // 核心指标 (库返回的是原始数字，我们需要手动加单位)
-      // 使用 helper 函数格式化大数字
-      marketCap: formatNumber(price.marketCap || detail.totalAssets),
-      peRatio: detail.trailingPE ? detail.trailingPE.toFixed(2) : '—',
-      dividendYield: detail.dividendYield ? (detail.dividendYield * 100).toFixed(2) + '%' : (detail.yield ? (detail.yield * 100).toFixed(2) + '%' : '—'),
-      high52: detail.fiftyTwoWeekHigh ? detail.fiftyTwoWeekHigh.toFixed(2) : '—',
-      low52: detail.fiftyTwoWeekLow ? detail.fiftyTwoWeekLow.toFixed(2) : '—'
+      sector: profile.sector || quote.quoteType || 'ETF/基金',
+      industry: profile.industry || '—',
+
+      // 价格 (从 quote 获取，更稳定)
+      currentPrice: quote.regularMarketPrice ? quote.regularMarketPrice.toFixed(2) : '—',
+      currency: quote.currencySymbol || '$',
+
+      // 核心指标
+      marketCap: formatNumber(quote.marketCap || detail.totalAssets),
+      peRatio: quote.trailingPE ? quote.trailingPE.toFixed(2) : (detail.trailingPE ? detail.trailingPE.toFixed(2) : '—'),
+      dividendYield: quote.trailingAnnualDividendYield
+        ? (quote.trailingAnnualDividendYield * 100).toFixed(2) + '%'
+        : (detail.dividendYield ? (detail.dividendYield * 100).toFixed(2) + '%' : '—'),
+      high52: quote.fiftyTwoWeekHigh ? quote.fiftyTwoWeekHigh.toFixed(2) : '—',
+      low52: quote.fiftyTwoWeekLow ? quote.fiftyTwoWeekLow.toFixed(2) : '—',
+
+      // 额外数据
+      dayChange: quote.regularMarketChange ? quote.regularMarketChange.toFixed(2) : '—',
+      dayChangePercent: quote.regularMarketChangePercent ? quote.regularMarketChangePercent.toFixed(2) + '%' : '—'
     };
 
     res.status(200).json(cleanData);
 
   } catch (error) {
-    console.error(`Detail fetch failed for ${symbol}:`, error);
+    console.error(`Detail fetch failed for ${symbol}:`, error.message);
+
+    // 返回更详细的错误信息用于调试
     res.status(200).json({
       symbol: symbol,
       name: symbol,
-      // 这里的错误信息会显示在弹窗里
-      description: "数据源暂时拥堵，请稍后再试。", 
+      description: `数据获取失败: ${error.message}`,
       currentPrice: "—",
-      error: true
+      error: true,
+      errorDetail: error.message
     });
   }
 }
