@@ -1,7 +1,7 @@
 // api/detail.js
-// V5.1 修复：简化 yahoo-finance2 调用
+// V5.2 修复：正确导入 yahoo-finance2
 
-import yahooFinance from 'yahoo-finance2';
+const yahooFinance = require('yahoo-finance2').default;
 
 export default async function handler(req, res) {
   // 1. 跨域设置
