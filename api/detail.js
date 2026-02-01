@@ -1,7 +1,5 @@
 // api/detail.js
-// V5.2 修复：正确导入 yahoo-finance2
-
-const yahooFinance = require('yahoo-finance2').default;
+// V6.0 使用动态导入解决 ESM 兼容问题
 
 export default async function handler(req, res) {
   // 1. 跨域设置
@@ -22,14 +20,18 @@ export default async function handler(req, res) {
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    // 2. 使用 quote 获取基础数据 (更稳定)
-    const quote = await yahooFinance.quote(symbol);
+    // 2. 动态导入 yahoo-finance2
+    const yahooFinance = await import('yahoo-finance2');
+    const yf = yahooFinance.default;
 
-    // 4. 尝试获取详细信息 (可能失败，所以包在 try 里)
+    // 3. 使用 quote 获取基础数据
+    const quote = await yf.quote(symbol);
+
+    // 4. 尝试获取详细信息
     let profile = {};
     let detail = {};
     try {
-      const summary = await yahooFinance.quoteSummary(symbol, {
+      const summary = await yf.quoteSummary(symbol, {
         modules: ['summaryProfile', 'summaryDetail', 'assetProfile']
       });
       profile = summary.summaryProfile || summary.assetProfile || {};
@@ -40,7 +42,7 @@ export default async function handler(req, res) {
 
     if (!quote) throw new Error('No data returned');
 
-    // 5. 组装数据 (优先使用 quote，detail 作为补充)
+    // 5. 组装数据
     const cleanData = {
       symbol: symbol,
       name: quote.shortName || quote.longName || symbol,
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
       sector: profile.sector || quote.quoteType || 'ETF/基金',
       industry: profile.industry || '—',
 
-      // 价格 (从 quote 获取，更稳定)
+      // 价格
       currentPrice: quote.regularMarketPrice ? quote.regularMarketPrice.toFixed(2) : '—',
       currency: quote.currencySymbol || '$',
 
@@ -71,7 +73,6 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error(`Detail fetch failed for ${symbol}:`, error.message);
 
-    // 返回更详细的错误信息用于调试
     res.status(200).json({
       symbol: symbol,
       name: symbol,
@@ -83,11 +84,11 @@ export default async function handler(req, res) {
   }
 }
 
-// 辅助：大数字格式化 (比如 1.2T, 50B)
+// 辅助：大数字格式化
 function formatNumber(num) {
   if (!num) return '—';
-  if (num > 1e12) return (num / 1e12).toFixed(2) + 'T'; // 万亿
-  if (num > 1e9) return (num / 1e9).toFixed(2) + 'B';  // 十亿
-  if (num > 1e6) return (num / 1e6).toFixed(2) + 'M';  // 百万
+  if (num > 1e12) return (num / 1e12).toFixed(2) + 'T';
+  if (num > 1e9) return (num / 1e9).toFixed(2) + 'B';
+  if (num > 1e6) return (num / 1e6).toFixed(2) + 'M';
   return num.toLocaleString();
 }
