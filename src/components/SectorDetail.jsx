@@ -13,9 +13,9 @@ const formatPrice = (value) => {
   return `$${value.toFixed(2)}`;
 };
 
-const SectorDetail = ({ 
-  sectorId, etfData, stockData, watchlist, 
-  onBack, onAddStock, onRemoveStock 
+const SectorDetail = ({
+  sectorId, etfData, stockData, watchlist,
+  onBack, onAddStock, onRemoveStock, onStockClick
 }) => {
   const sector = getSectorById(sectorId);
   const stocks = watchlist[sectorId] || [];
@@ -204,10 +204,10 @@ const SectorDetail = ({
                 <StockRow
                   key={symbol}
                   symbol={symbol}
-                  displayName={stockData[symbol]?.nameCN} // 传入中文名
+                  displayName={stockData[symbol]?.nameCN}
                   data={stockData[symbol]}
                   onRemove={(s) => onRemoveStock(sectorId, s)}
-                  onOpenYahoo={handleOpenYahoo}
+                  onClick={() => onStockClick && onStockClick(symbol)}
                 />
             ))}
             {sortedStocks.length === 0 && (
