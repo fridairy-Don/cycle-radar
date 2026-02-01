@@ -1,15 +1,7 @@
 // api/detail.js
-// V5.0 修复：配置 yahoo-finance2 解决 Vercel 环境问题
+// V5.1 修复：简化 yahoo-finance2 调用
 
 import yahooFinance from 'yahoo-finance2';
-
-// 配置 yahoo-finance2 以适应 Vercel 环境
-yahooFinance.setGlobalConfig({
-  queue: {
-    concurrency: 1,
-    timeout: 30000
-  }
-});
 
 export default async function handler(req, res) {
   // 1. 跨域设置
